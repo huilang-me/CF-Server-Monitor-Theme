@@ -1,4 +1,4 @@
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 
 const translations = reactive({
   en: {
@@ -79,7 +79,6 @@ const translations = reactive({
     login: 'Login',
     invalidCredentials: 'Invalid username or password',
     adminPanel: 'Admin Panel',
-    selectAdminPanel: 'Select Admin Panel',
     sudoStatus: 'sudo systemctl status',
     refresh: 'REFRESH',
     logout: 'Logout',
@@ -270,7 +269,7 @@ const translations = reactive({
     dbColumnsAdded: 'Database columns missing, added missing columns. Please click save again.',
     serverUpdateFailed: 'Server update failed',
     adminDisabled: 'Admin Panel Disabled',
-    adminDisabledDesc: 'Admin panel is disabled when using remote API mode.',
+    adminDisabledDesc: 'Admin panel is disabled when using multi-site mode.',
     backToDashboard: 'Back to Dashboard',
     validationError: 'Validation Error',
     turnstileSiteKeyRequired: 'Turnstile Site Key is required when Turnstile is enabled',
@@ -356,7 +355,6 @@ const translations = reactive({
     login: '登录',
     invalidCredentials: '用户名或密码错误',
     adminPanel: '管理面板',
-    selectAdminPanel: '选择管理面板',
     sudoStatus: '系统状态',
     refresh: '刷新',
     logout: '退出',
@@ -545,7 +543,7 @@ const translations = reactive({
     dbColumnsAdded: '数据库字段缺失，已添加缺失字段，请再次点击保存',
     serverUpdateFailed: '服务器更新失败',
     adminDisabled: '管理面板已禁用',
-    adminDisabledDesc: '使用远程 API 模式时，管理面板已禁用。',
+    adminDisabledDesc: '使用多站点模式时，管理面板已禁用。',
     backToDashboard: '返回仪表盘',
     validationError: '验证错误',
     turnstileSiteKeyRequired: '启用 Turnstile 时必须填写站点密钥',
@@ -578,4 +576,9 @@ export const toggleLanguage = () => {
 
 export { currentLang, translations }
 
-export default { t, setLanguage, getLanguage, toggleLanguage, currentLang, translations }
+export const useTranslation = () => {
+  const trans = computed(() => translations[currentLang.value] || translations.en)
+  return trans
+}
+
+export default { t, setLanguage, getLanguage, toggleLanguage, currentLang, translations, useTranslation }

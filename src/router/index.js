@@ -7,8 +7,13 @@ const routes = [
     component: () => import('../views/Dashboard.vue')
   },
   {
+    path: '/admin',
+    name: 'Admin',
+    component: () => import('../views/Admin.vue')
+  },
+  {
     path: '/server/:id',
-    name: 'ServerDetail',
+    name: 'Server',
     component: () => import('../views/ServerDetail.vue')
   }
 ]

@@ -2,6 +2,12 @@
   <div class="container">
     <TerminalHeader :title="sysConfig.site_title || 'Server Monitor'" />
     
+    <div v-if="isLoading" class="loading-state">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">$ {{ trans.loading }}</div>
+    </div>
+
+    <template v-else>
     <div class="nav-area">
       <div class="header-row">
         <div class="site-title">$ ./{{ sysConfig.site_title || 'Server Monitor' }}</div>
@@ -63,11 +69,7 @@
     </div>
 
     <div id="view-card" class="view-panel" :class="{ active: currentView === 'card' }">
-      <div v-if="isLoading" class="loading-state">
-        <div class="loading-spinner"></div>
-        <div class="loading-text">$ {{ trans.loading }}</div>
-      </div>
-      <div v-else-if="groupedServers.length === 0" class="empty-state">
+      <div v-if="groupedServers.length === 0" class="empty-state">
         [!] {{ trans.noServer }}，请在 <router-link to="/admin" class="admin-link-color">{{ trans.backToAdmin }}</router-link> 中添加
       </div>
       <div v-else>
@@ -182,6 +184,7 @@
         <div ref="mapContainer" id="map-container"></div>
       </div>
     </div>
+    </template>
 
     <Footer />
   </div>
@@ -193,10 +196,10 @@ import { useRouter } from 'vue-router'
 import TerminalHeader from '../components/TerminalHeader.vue'
 import ServerCard from '../components/ServerCard.vue'
 import Footer from '../components/Footer.vue'
-import { fetchServers, fetchServersAll, formatBytes, createLiveSocket, getFlagRegionCode, getApiBases } from '../utils/api.js'
-import { t, currentLang } from '../utils/i18n.js'
-import { translations } from '../utils/i18n.js'
+import { fetchServers, fetchServersAll, formatBytes, createLiveSocket, getFlagRegionCode, getApiBases, getTrafficUsagePercent, isServerOnline } from '../utils/api.js'
+import { t, currentLang, useTranslation } from '../utils/i18n.js'
 import { TIME } from '../utils/constants'
+import { normalizeTimestamp as normalizeMetricTimestamp } from '../utils/time.js'
 
 const servers = ref([])
 const stats = ref({ total: '-', online: 0, offline: 0, globalNetRx: 0, globalNetTx: 0, globalSpeedIn: 0, globalSpeedOut: 0 })
@@ -218,7 +221,7 @@ const isLoading = ref(true)
 const now = ref(Date.now())
 const router = useRouter()
 
-const trans = computed(() => translations[currentLang.value] || translations.en)
+const trans = useTranslation()
 
 const filterOptions = computed(() => {
   const normalizedStats = {}
@@ -268,8 +271,7 @@ const setFilter = (code) => {
 }
 
 const getStatusColor = (server) => {
-  const lastUpdated = new Date(server.last_updated).getTime()
-  return (Date.now() - lastUpdated) < TIME.ONLINE_THRESHOLD_MS ? 'var(--accent-green)' : 'var(--accent-red)'
+  return isServerOnline(server) ? 'var(--accent-green)' : 'var(--accent-red)'
 }
 
 const getUpdateTime = (lastUpdated) => {
@@ -301,38 +303,9 @@ const getUpdateTime = (lastUpdated) => {
   }
 }
 
-const getTrafficUsagePercent = (server) => {
-  const limit = parseFloat(server.traffic_limit) || 0
-  if (limit <= 0) return '0'
-
-  const limitBytes = limit * 1024 * 1024 * 1024
-  let usedBytes = 0
-
-  const calcType = server.traffic_calc_type || 'total'
-  if (calcType === 'dl') {
-    usedBytes = parseFloat(server.net_rx_monthly) || 0
-  } else if (calcType === 'ul') {
-    usedBytes = parseFloat(server.net_tx_monthly) || 0
-  } else {
-    usedBytes = (parseFloat(server.net_rx_monthly) || 0) + (parseFloat(server.net_tx_monthly) || 0)
-  }
-
-  const percent = (usedBytes / limitBytes) * 100
-  return percent.toFixed(1)
-}
-
 const PLAYBACK_TICK_MS = 1000
 const MAX_BUFFER_SAMPLES_PER_SERVER = 600
 const playbackBuffers = new Map()
-
-const normalizeMetricTimestamp = (value, fallback = null) => {
-  const ts = Number(value)
-  if (Number.isFinite(ts) && ts > 0) {
-    return ts < 10000000000 ? ts * 1000 : ts
-  }
-  const parsed = new Date(value).getTime()
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
-}
 
 const getServerReportTimestamp = (server, fallback = null) => {
   return normalizeMetricTimestamp(server?.report_timestamp ?? server?.last_updated, fallback)

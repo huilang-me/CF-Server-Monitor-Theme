@@ -1993,6 +1993,46 @@ body::before {
     margin-bottom: 24px;
 }
 
+.site-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+    text-align: left;
+}
+
+.site-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--accent-cyan);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 13px;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.site-item:hover {
+    border-color: var(--accent-cyan);
+    background: rgba(0, 212, 170, 0.05);
+}
+
+.site-index {
+    color: var(--text-muted);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.site-url {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* --------------------------------------------------------------------------
    37. Admin Login Styles
    -------------------------------------------------------------------------- */

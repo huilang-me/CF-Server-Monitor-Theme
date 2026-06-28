@@ -90,10 +90,10 @@
 
 <script setup>
 import { computed } from 'vue'
-import { formatBytes, getFlagRegionCode } from '../utils/api'
-import { t, currentLang } from '../utils/i18n'
-import { translations } from '../utils/i18n'
-import { TIME, PING } from '../utils/constants'
+import { formatBytes, getFlagRegionCode, getTrafficUsagePercent, isServerOnline } from '../utils/api'
+import { t, currentLang, useTranslation } from '../utils/i18n'
+import { PING } from '../utils/constants'
+import { normalizeTimestamp, formatDateTime } from '../utils/time.js'
 
 const props = defineProps({
   server: {
@@ -116,7 +116,7 @@ const props = defineProps({
   }
 })
 
-const trans = computed(() => translations[currentLang.value] || translations.en)
+const trans = useTranslation()
 
 const currentTime = computed(() => {
   const ts = Number(props.server.current_timestamp)
@@ -128,11 +128,7 @@ const currentTime = computed(() => {
 
 const regionCode = computed(() => getFlagRegionCode(props.server.region))
 
-const isOnline = computed(() => {
-  const lastUpdated = normalizeTimestamp(props.server.report_timestamp ?? props.server.last_updated)
-  if (!lastUpdated) return false
-  return (currentTime.value - lastUpdated) < TIME.ONLINE_THRESHOLD_MS
-})
+const isOnline = computed(() => isServerOnline(props.server, currentTime.value))
 
 const statusColor = computed(() => isOnline.value ? 'var(--accent-green)' : 'var(--accent-red)')
 const statusText = computed(() => isOnline.value ? trans.value.online : trans.value.offline)
@@ -151,47 +147,12 @@ const diskPercent = computed(() => {
   return '0.00'
 })
 
-const trafficUsagePercent = computed(() => {
-  const limit = parseFloat(props.server.traffic_limit) || 0
-  if (limit <= 0) return '0'
-  
-  const limitBytes = limit * 1024 * 1024 * 1024
-  let usedBytes = 0
-  
-  const calcType = props.server.traffic_calc_type || 'total'
-  if (calcType === 'dl') {
-    usedBytes = parseFloat(props.server.net_rx_monthly) || 0
-  } else if (calcType === 'ul') {
-    usedBytes = parseFloat(props.server.net_tx_monthly) || 0
-  } else {
-    usedBytes = (parseFloat(props.server.net_rx_monthly) || 0) + (parseFloat(props.server.net_tx_monthly) || 0)
-  }
-  
-  const percent = (usedBytes / limitBytes) * 100
-  return percent.toFixed(1)
-})
+const trafficUsagePercent = computed(() => getTrafficUsagePercent(props.server))
 
 const netInSpeed = computed(() => formatBytes(props.server.net_in_speed))
 const netOutSpeed = computed(() => formatBytes(props.server.net_out_speed))
 const totalRx = computed(() => formatBytes(props.server.net_rx))
 const totalTx = computed(() => formatBytes(props.server.net_tx))
-
-const normalizeTimestamp = (value) => {
-  if (value === null || value === undefined || value === '') return null
-  const numeric = Number(value)
-  if (Number.isFinite(numeric) && numeric > 0) {
-    return numeric < 10000000000 ? numeric * 1000 : numeric
-  }
-  const parsed = new Date(value).getTime()
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-}
-
-const formatDateTime = (timestamp) => {
-  if (!timestamp) return '-'
-  const date = new Date(timestamp)
-  const pad = (num) => String(num).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
 
 const dataTimeText = computed(() => {
   const reportTimestamp = normalizeTimestamp(props.server.report_timestamp ?? props.server.last_updated)

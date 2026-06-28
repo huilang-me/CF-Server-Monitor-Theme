@@ -8,6 +8,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, 'dist');
 const publicDir = path.resolve(__dirname, 'public');
 
+console.log('Generating config.json from environment variables...');
+fs.ensureDirSync(publicDir);
+const apiBase = process.env.API_BASE
+  ? process.env.API_BASE.split(',').map(s => s.trim()).filter(Boolean)
+  : [];
+const title = process.env.TITLE || '';
+const backgroundImage = process.env.BACKGROUND_IMAGE || '';
+const config = { apiBase, title, backgroundImage };
+fs.writeFileSync(
+  path.join(publicDir, 'config.json'),
+  JSON.stringify(config, null, 2),
+  'utf8'
+);
+console.log('Generated config.json:', JSON.stringify(config));
+
 console.log('Cleaning dist directory...');
 if (fs.existsSync(distDir)) {
   fs.removeSync(distDir);
