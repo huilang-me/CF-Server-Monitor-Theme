@@ -123,8 +123,7 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
   const connect = () => {
     manualClose = false
     try {
-      const idsParam = serverIds && serverIds.length > 0 ? `&ids=${encodeURIComponent(serverIds.join(','))}` : ''
-      ws = new WebSocket(`${getWsBaseByIndex(apiIndex)}/api/ws?subscribe=${encodeURIComponent(scope)}${idsParam}`)
+      ws = new WebSocket(`${getWsBaseByIndex(apiIndex)}/api/ws?subscribe=${encodeURIComponent(scope)}`)
     } catch (e) {
       setStatus(false, 'WebSocket not supported')
       return
@@ -133,6 +132,13 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
     ws.addEventListener('open', () => {
       reconnectDelay = TIME.RECONNECT_INITIAL_DELAY_MS
       reconnectAttempts = 0
+      try {
+        ws.send(JSON.stringify({
+          type: 'subscribe',
+          scope,
+          ids: Array.isArray(serverIds) ? serverIds : []
+        }))
+      } catch (_) {}
       setStatus(true, 'connected')
     })
 
