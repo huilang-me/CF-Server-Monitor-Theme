@@ -566,7 +566,7 @@ let liveSockets = []
 let themeObserver = null
 let timeUpdateInterval = null
 
-const startLiveSocket = () => {
+const startLiveSocket = (ids = []) => {
   const bases = getApiBases()
 
   // 如果没有配置多个 API bases，使用原来的单连接方式
@@ -577,7 +577,7 @@ const startLiveSocket = () => {
       onStatus: ({ connected }) => {
         liveConnected.value = !!connected
       }
-    })]
+    }, 0, ids)]
     return
   }
 
@@ -590,7 +590,7 @@ const startLiveSocket = () => {
         const anyConnected = liveSockets.some(s => s && s.isConnected)
         liveConnected.value = anyConnected
       }
-    }, index)
+    }, index, ids)
   })
 }
 
@@ -725,11 +725,12 @@ const goToServer = (server) => {
   router.push(getServerLink(server))
 }
 
-onMounted(() => {
+onMounted(async () => {
   const savedView = localStorage.getItem('monitor_preferred_view') || 'card'
   currentView.value = savedView
-  refreshData()
-  startLiveSocket()
+  await refreshData()
+  const ids = servers.value.map(s => s.id).filter(Boolean)
+  startLiveSocket(ids)
 
   // 每秒更新 now 变量，使相对时间实时刷新
   runDashboardTick()

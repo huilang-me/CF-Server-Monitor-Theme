@@ -8,7 +8,7 @@ export { getApiBases, getWsBase }
 
 export const VERSION = ref('')
 
-export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0) => {
+export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverIds = []) => {
   const { onUpdate, onStatus, onMessage } = handlers
   const shouldReplay = handlers.replay !== false
   const scope = (subscribe || 'all').toLowerCase()
@@ -123,7 +123,8 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0) => {
   const connect = () => {
     manualClose = false
     try {
-      ws = new WebSocket(`${getWsBaseByIndex(apiIndex)}/api/ws?subscribe=${encodeURIComponent(scope)}`)
+      const idsParam = serverIds && serverIds.length > 0 ? `&ids=${encodeURIComponent(serverIds.join(','))}` : ''
+      ws = new WebSocket(`${getWsBaseByIndex(apiIndex)}/api/ws?subscribe=${encodeURIComponent(scope)}${idsParam}`)
     } catch (e) {
       setStatus(false, 'WebSocket not supported')
       return
