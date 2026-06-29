@@ -592,9 +592,10 @@ const startLiveSocket = () => {
     return
   }
 
-  // 为每个 API base 创建独立的 WebSocket 连接，只传该 base 的 server IDs
+  // 为每个 API base 创建独立的 WebSocket 连接，跳过没有服务器的 base
   liveSockets = bases.map((_, index) => {
-    const ids = idsByIndex.get(index) || []
+    const ids = idsByIndex.get(index)
+    if (!ids || ids.length === 0) return null
     return createLiveSocket('all', {
       replay: false,
       onMessage: queueLiveMessage,
@@ -603,7 +604,7 @@ const startLiveSocket = () => {
         liveConnected.value = anyConnected
       }
     }, index, ids)
-  })
+  }).filter(Boolean)
 }
 
 const initMap = () => {
