@@ -43,8 +43,14 @@
       <Footer />
     </div>
 
-    <div v-else class="container" id="admin-content">
+    <div v-else class="container admin-container" id="admin-content">
       <TerminalHeader :title="trans.adminPanel" />
+      <div v-if="adminSiteLoading" class="admin-loading-overlay">
+        <div class="loading-content">
+          <div class="loading-spinner"></div>
+          <div class="loading-text">$ {{ trans.switchingSite }}</div>
+        </div>
+      </div>
       
       <div class="main-panel">
         <div class="panel-header">
@@ -52,12 +58,13 @@
             <span class="prompt">$</span> {{ trans.sudoStatus }}
           </div>
           <div class="header-actions">
-            <button @click="loadServers" class="btn">↻ {{ trans.refresh }}</button>
+            <button @click="loadServers" class="btn" :disabled="adminSiteLoading">↻ {{ trans.refresh }}</button>
             <select
               v-if="isMultipleMode"
               v-model.number="selectedApiIndex"
               class="form-select admin-site-select"
               :title="trans.apiEndpoint"
+              :disabled="adminSiteLoading"
               @change="handleAdminApiIndexChange"
             >
               <option
@@ -971,6 +978,7 @@ const isLoggedIn = ref(false)
 const loginForm = ref({ username: '', password: '' })
 const loginError = ref('')
 const loginLoading = ref(false)
+const adminSiteLoading = ref(false)
 const turnstileEnabled = ref(false)
 const turnstileLoginEnabled = ref(false)
 const turnstileSiteKey = ref('')
@@ -1170,11 +1178,22 @@ const resetAdminContext = () => {
   validationError.value = null
 }
 
-const handleAdminApiIndexChange = async () => {
+const switchAdminSite = async () => {
   resetAdminContext()
+  adminSiteLoading.value = true
+  try {
+    await Promise.all([
+      loadSettings(),
+      loadServers()
+    ])
+  } finally {
+    adminSiteLoading.value = false
+  }
+}
+
+const handleAdminApiIndexChange = async () => {
   syncApiIndexQuery()
-  await loadSettings()
-  await loadServers()
+  await switchAdminSite()
 }
 
 const loadTurnstileScript = () => {
@@ -1734,11 +1753,9 @@ watch(() => route.query.apiIndex, async (value) => {
   if (nextIndex === selectedApiIndex.value) return
 
   selectedApiIndex.value = nextIndex
-  resetAdminContext()
 
   if (isLoggedIn.value) {
-    await loadSettings()
-    await loadServers()
+    await switchAdminSite()
   } else {
     await loadTurnstileConfig()
   }
