@@ -33,7 +33,7 @@
               </button>
             </div>
           </div>
-          <div v-if="(turnstileEnabled || turnstileLoginEnabled) && turnstileSiteKey" class="login-form-group">
+          <div v-if="turnstileSiteKey && (turnstileLoginEnabled || (turnstileEnabled && !turnstileVerified))" class="login-form-group">
             <div id="admin-turnstile-container"></div>
           </div>
           <div v-if="loginError" id="login-error" class="login-error">{{ loginError }}</div>
@@ -983,6 +983,8 @@ const turnstileEnabled = ref(false)
 const turnstileLoginEnabled = ref(false)
 const turnstileSiteKey = ref('')
 const turnstileToken = ref('')
+const turnstileVerified = ref(false)
+const turnstileBlocked = ref(false)
 const activeTab = ref('servers')
 const servers = ref([])
 const selectedServers = ref([])
@@ -1080,7 +1082,19 @@ const handleLogin = async () => {
     loginError.value = ''
     loginLoading.value = true
     
-    if ((turnstileEnabled.value || turnstileLoginEnabled.value) && !turnstileToken.value) {
+    if (turnstileBlocked.value) {
+      loginError.value = trans.value.turnstileSiteKeyMismatchDesc
+      loginLoading.value = false
+      return
+    }
+
+    if (turnstileLoginEnabled.value && !turnstileToken.value) {
+      loginError.value = 'Please complete the verification'
+      loginLoading.value = false
+      return
+    }
+
+    if (turnstileEnabled.value && !turnstileVerified.value && !turnstileToken.value) {
       loginError.value = 'Please complete the verification'
       loginLoading.value = false
       return
@@ -1090,9 +1104,9 @@ const handleLogin = async () => {
     if (!result.error) {
       isLoggedIn.value = true
       syncApiIndexQuery()
-      if (turnstileToken.value) {
-        localStorage.setItem('turnstile_token', turnstileToken.value)
-      }
+      turnstileToken.value = ''
+      turnstileVerified.value = hasSharedTurnstileVerified()
+      localStorage.removeItem('turnstile_token')
       loadSettings()
       loadServers()
     } else {
@@ -1121,6 +1135,54 @@ const checkLoginStatus = () => {
   return !!token
 }
 
+const isTurnstileValueEnabled = (value) => value === true || value === 'true'
+const normalizeTurnstileSiteKey = (value) => String(value || '').trim()
+const hasSharedTurnstileVerified = () => !!localStorage.getItem('turnstile_verified')
+
+const getTurnstileEnabledSites = (results) => {
+  return results
+    .map((result, index) => ({ result, index }))
+    .filter(({ result }) => {
+      if (result.error || !result.data) return false
+      return isTurnstileValueEnabled(result.data.turnstile_enabled) || isTurnstileValueEnabled(result.data.turnstile_login_enabled)
+    })
+    .map(({ result, index }) => ({
+      index,
+      data: result.data,
+      siteKey: normalizeTurnstileSiteKey(result.data.turnstile_site_key)
+    }))
+}
+
+const hasTurnstileSiteKeyMismatch = (sites) => {
+  const keys = [...new Set(sites.map(site => site.siteKey).filter(Boolean))]
+  return sites.some(site => !site.siteKey) || keys.length > 1
+}
+
+const fetchAllTurnstileConfigs = async () => {
+  let results = await http.getAll('/api/config', { includeAuth: true, includeTurnstile: true, autoRedirect: false })
+  if (results.some(result => result.status === 403)) {
+    results = await http.getAll('/api/config', { includeAuth: true, includeTurnstile: false, autoRedirect: false })
+  }
+  return results
+}
+
+const applyTurnstileConfig = async (config, sharedSiteKey = '') => {
+  if (!config) return
+
+  turnstileEnabled.value = isTurnstileValueEnabled(config.turnstile_enabled)
+  turnstileLoginEnabled.value = isTurnstileValueEnabled(config.turnstile_login_enabled)
+
+  const requiresTurnstile = turnstileEnabled.value || turnstileLoginEnabled.value
+  turnstileSiteKey.value = requiresTurnstile ? (sharedSiteKey || config.turnstile_site_key || '') : ''
+  turnstileVerified.value = turnstileEnabled.value && (config.verified === true || hasSharedTurnstileVerified())
+
+  if (turnstileSiteKey.value && (turnstileLoginEnabled.value || (turnstileEnabled.value && !turnstileVerified.value))) {
+    await loadTurnstileScript()
+    await nextTick()
+    renderTurnstile()
+  }
+}
+
 const initAdmin = async () => {
   const hasCreds = checkLoginStatus()
   if (hasCreds) {
@@ -1143,20 +1205,30 @@ const loadTurnstileConfig = async () => {
     turnstileLoginEnabled.value = false
     turnstileSiteKey.value = ''
     turnstileToken.value = ''
+    turnstileVerified.value = false
+    turnstileBlocked.value = false
+    loginError.value = ''
     localStorage.removeItem('turnstile_token')
+
+    if (isMultipleMode.value) {
+      const results = await fetchAllTurnstileConfigs()
+      const enabledSites = getTurnstileEnabledSites(results)
+
+      if (hasTurnstileSiteKeyMismatch(enabledSites)) {
+        turnstileBlocked.value = true
+        loginError.value = trans.value.turnstileSiteKeyMismatchDesc
+        return
+      }
+
+      const selectedResult = results[selectedApiIndex.value]
+      const selectedConfig = selectedResult && !selectedResult.error ? selectedResult.data : null
+      await applyTurnstileConfig(selectedConfig, enabledSites[0]?.siteKey || '')
+      return
+    }
 
     const result = await http.getByIndex('/api/config', selectedApiIndex.value, { includeAuth: true, includeTurnstile: true })
     if (!result.error) {
-      const config = result.data
-      turnstileEnabled.value = config.turnstile_enabled === true || config.turnstile_enabled === 'true'
-      turnstileLoginEnabled.value = config.turnstile_login_enabled === true || config.turnstile_login_enabled === 'true'
-      turnstileSiteKey.value = config.turnstile_site_key || ''
-      
-      if ((turnstileEnabled.value || turnstileLoginEnabled.value) && turnstileSiteKey.value) {
-        await loadTurnstileScript()
-        await nextTick()
-        renderTurnstile()
-      }
+      await applyTurnstileConfig(result.data)
     }
   } catch (e) {
     console.error('Failed to load Turnstile config:', e)

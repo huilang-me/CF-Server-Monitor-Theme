@@ -5,7 +5,7 @@ import './styles/main.css'
 import './styles/light.css'
 import { currentLang, translations } from './utils/i18n'
 import { http } from './utils/http'
-import { initConfig, getTitle, getBackgroundImage, hasMultipleApiBases, getApiBases } from './utils/config'
+import { initConfig, getTitle, getBackgroundImage, hasMultipleApiBases } from './utils/config'
 import { VERSION } from './utils/api'
 
 const getTranslation = () => {
@@ -65,14 +65,14 @@ async function loadTurnstileScript() {
   })
 }
 
-async function verifyTurnstile(siteKey) {
+async function verifyTurnstileByIndex(siteKey, apiIndex = 0) {
   return new Promise((resolve) => {
     turnstile.render('#turnstile-container', {
       sitekey: siteKey,
       callback: async (token) => {
         localStorage.setItem('turnstile_token', token)
         try {
-          const result = await http.get('/api/config', { includeAuth: false, includeTurnstile: true, autoRedirect: false })
+          const result = await http.getByIndex('/api/config', apiIndex, { includeAuth: false, includeTurnstile: true, autoRedirect: false })
           if (!result.error) {
             resolve(result.data && result.data.verified === true)
           } else {
@@ -95,16 +95,110 @@ async function verifyTurnstile(siteKey) {
   })
 }
 
-const showTurnstileUnsupported = () => {
+const isEnabled = (value) => value === true || value === 'true'
+const normalizeSiteKey = (value) => String(value || '').trim()
+
+const getEnabledTurnstileSites = (results, mode = 'global') => {
+  return results
+    .map((result, index) => ({ result, index }))
+    .filter(({ result }) => {
+      if (result.error || !result.data) return false
+      if (mode === 'login') {
+        return isEnabled(result.data.turnstile_enabled) || isEnabled(result.data.turnstile_login_enabled)
+      }
+      return isEnabled(result.data.turnstile_enabled)
+    })
+    .map(({ result, index }) => ({
+      index,
+      data: result.data,
+      siteKey: normalizeSiteKey(result.data.turnstile_site_key),
+      verified: result.data.verified === true
+    }))
+}
+
+const hasTurnstileSiteKeyMismatch = (sites) => {
+  const keys = [...new Set(sites.map(site => site.siteKey).filter(Boolean))]
+  return sites.some(site => !site.siteKey) || keys.length > 1
+}
+
+const getPrivateAccessState = (results) => {
+  const privateSites = results.filter(result => !result.error && result.data && result.data.is_public === false)
+  return {
+    hasPrivateSite: privateSites.length > 0,
+    hasUnauthorizedPrivateSite: privateSites.some(result => result.data.authorization !== true)
+  }
+}
+
+const fetchAllConfigs = async () => {
+  let results = await http.getAll('/api/config', { includeAuth: true, includeTurnstile: true, autoRedirect: false })
+  if (results.some(result => result.status === 403)) {
+    results = await http.getAll('/api/config', { includeAuth: true, includeTurnstile: false, autoRedirect: false })
+  }
+  return results
+}
+
+const showTurnstileError = (title, desc) => {
   const loading = document.getElementById('loading')
   if (loading) {
     loading.innerHTML = `
       <div class="loading-content">
         <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-        <div class="loading-text" style="color: #f85149;">${trans().turnstileNotSupported}</div>
-        <div style="font-size: 12px; color: #6b7280; margin-top: 12px; max-width: 480px; text-align: center; line-height: 1.6;">${trans().turnstileNotSupportedDesc}</div>
+        <div class="loading-text" style="color: #f85149;">${title}</div>
+        <div style="font-size: 12px; color: #6b7280; margin-top: 12px; max-width: 480px; text-align: center; line-height: 1.6;">${desc}</div>
       </div>
     `
+  }
+}
+
+const showTurnstileUnsupported = () => {
+  showTurnstileError(trans().turnstileNotSupported, trans().turnstileNotSupportedDesc)
+}
+
+const showTurnstileSiteKeyMismatch = () => {
+  showTurnstileError(trans().turnstileSiteKeyMismatch, trans().turnstileSiteKeyMismatchDesc)
+}
+
+const renderStartupTurnstile = async (siteKey, apiIndex) => {
+  const loading = document.getElementById('loading')
+  if (loading) {
+    loading.innerHTML = `
+      <div class="loading-content">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">$ Verifying...</div>
+        <div id="turnstile-container" style="margin-top: 20px;"></div>
+      </div>
+    `
+  }
+
+  try {
+    await loadTurnstileScript()
+    const verified = await verifyTurnstileByIndex(siteKey, apiIndex)
+
+    if (!verified) {
+      if (loading) {
+        loading.innerHTML = `
+          <div class="loading-content">
+            <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
+            <div class="loading-text" style="color: #f85149;">${trans().verificationFailed}</div>
+            <div style="font-size: 12px; color: #6b7280; margin-top: 8px;">${trans().refreshToRetry}</div>
+          </div>
+        `
+      }
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error('Turnstile error:', e)
+    if (loading) {
+      loading.innerHTML = `
+        <div class="loading-content">
+          <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
+          <div class="loading-text" style="color: #f85149;">${trans().verificationError}</div>
+          <div style="font-size: 12px; color: #6b7280; margin-top: 8px;">${trans().refreshToRetry}</div>
+        </div>
+      `
+    }
+    return false
   }
 }
 
@@ -130,32 +224,39 @@ async function initApp() {
 
   const isMultipleMode = hasMultipleApiBases()
   const currentHash = window.location.hash
-  const isDashboard = currentHash === '' || currentHash === '#/' || currentHash === '#'
   const isAdmin = currentHash.startsWith('#/admin')
 
-  // 多站模式首页：一次 getAll 获取所有站点配置，检查 turnstile 并合并出当前站点配置
+  // 多站模式公开页面：一次 getAll 获取所有站点配置，检查 Turnstile key 是否可共享。
   let config
-  if (isMultipleMode && isDashboard) {
+  if (isMultipleMode && !isAdmin) {
     try {
-      const results = await http.getAll('/api/config', { includeAuth: true, includeTurnstile: true })
-      const anyTurnstile = results.some(r => !r.error && r.data && r.data.turnstile_enabled)
-      if (anyTurnstile) {
-        showTurnstileUnsupported()
+      const results = await fetchAllConfigs()
+      const enabledTurnstileSites = getEnabledTurnstileSites(results, 'global')
+      if (hasTurnstileSiteKeyMismatch(enabledTurnstileSites)) {
+        showTurnstileSiteKeyMismatch()
         return
       }
       const first = results.find(r => !r.error && r.data)
+      const sharedTurnstileSite = enabledTurnstileSites[0] || null
+      const privateAccess = getPrivateAccessState(results)
       config = first ? {
-        turnstile_enabled: first.data.turnstile_enabled === true,
-        turnstile_login_enabled: first.data.turnstile_login_enabled === true,
-        turnstile_site_key: first.data.turnstile_site_key || '',
+        turnstile_enabled: isEnabled(first.data.turnstile_enabled),
+        turnstile_login_enabled: isEnabled(first.data.turnstile_login_enabled),
+        turnstile_site_key: sharedTurnstileSite?.siteKey || first.data.turnstile_site_key || '',
+        turnstile_api_index: sharedTurnstileSite?.index || 0,
         version: first.data.version || '',
-        verified: first.data.verified === true,
-        is_public: first.data.is_public !== false,
-        authorization: first.data.authorization === true
-      } : { turnstile_enabled: false, turnstile_login_enabled: false, turnstile_site_key: '', version: '', verified: false, is_public: true, authorization: false }
+        verified: sharedTurnstileSite ? enabledTurnstileSites.every(site => site.verified) : first.data.verified === true,
+        is_public: !privateAccess.hasPrivateSite,
+        authorization: !privateAccess.hasUnauthorizedPrivateSite
+      } : { turnstile_enabled: false, turnstile_login_enabled: false, turnstile_site_key: '', turnstile_api_index: 0, version: '', verified: false, is_public: true, authorization: false }
+      if (sharedTurnstileSite) {
+        config.turnstile_enabled = true
+        config.turnstile_site_key = sharedTurnstileSite.siteKey
+        config.turnstile_api_index = sharedTurnstileSite.index
+      }
       if (config.version) VERSION.value = config.version
     } catch (_) {
-      config = { turnstile_enabled: false, turnstile_login_enabled: false, turnstile_site_key: '', version: '', verified: false, is_public: true, authorization: false }
+      config = { turnstile_enabled: false, turnstile_login_enabled: false, turnstile_site_key: '', turnstile_api_index: 0, version: '', verified: false, is_public: true, authorization: false }
     }
   } else {
     config = await fetchConfig()
@@ -164,47 +265,13 @@ async function initApp() {
   // 仅全局模式需要在启动时验证 Turnstile；登录模式在 Admin 页面的登录表单中验证
   if (config.turnstile_enabled) {
     if (isMultipleMode) {
-      if (!isAdmin) {
-        showTurnstileUnsupported()
-        return
+      if (!config.verified && config.turnstile_site_key) {
+        const verified = await renderStartupTurnstile(config.turnstile_site_key, config.turnstile_api_index || 0)
+        if (!verified) return
       }
     } else if (config.turnstile_site_key && !config.verified) {
-      const loading = document.getElementById('loading')
-      if (loading) {
-        loading.innerHTML = `
-          <div class="loading-content">
-            <div class="loading-spinner"></div>
-            <div class="loading-text">$ Verifying...</div>
-            <div id="turnstile-container" style="margin-top: 20px;"></div>
-          </div>
-        `
-      }
-
-      try {
-        await loadTurnstileScript()
-        const verified = await verifyTurnstile(config.turnstile_site_key)
-
-        if (!verified) {
-          loading.innerHTML = `
-            <div class="loading-content">
-              <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
-              <div class="loading-text" style="color: #f85149;">${trans().verificationFailed}</div>
-              <div style="font-size: 12px; color: #6b7280; margin-top: 8px;">${trans().refreshToRetry}</div>
-            </div>
-          `
-          return
-        }
-      } catch (e) {
-        console.error('Turnstile error:', e)
-        loading.innerHTML = `
-          <div class="loading-content">
-            <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
-            <div class="loading-text" style="color: #f85149;">${trans().verificationError}</div>
-            <div style="font-size: 12px; color: #6b7280; margin-top: 8px;">${trans().refreshToRetry}</div>
-          </div>
-        `
-        return
-      }
+      const verified = await renderStartupTurnstile(config.turnstile_site_key, 0)
+      if (!verified) return
     }
   }
 

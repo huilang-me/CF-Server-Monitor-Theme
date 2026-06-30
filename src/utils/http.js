@@ -7,22 +7,16 @@ const DEFAULT_ERROR_MESSAGES = {
   500: 'Internal Server Error'
 }
 
-const TURNSTILE_KEY_PREFIX = 'turnstile_verified:'
+const TURNSTILE_VERIFIED_KEY = 'turnstile_verified'
 
-const getTurnstileVerifiedKey = (baseUrl) => {
-  return TURNSTILE_KEY_PREFIX + (baseUrl || getApiBases()[0])
-}
-
-const getAdminHash = (baseUrl) => {
-  const bases = getApiBases()
-  const index = bases.indexOf(baseUrl)
-  if (bases.length > 1) {
-    return `#/admin?apiIndex=${index >= 0 ? index : 0}`
-  }
+const getAdminHash = () => {
   return '#/admin'
 }
 
-const createHeaders = (includeAuth = true, includeTurnstile = true, baseUrl = null) => {
+const createHeaders = (includeAuth = true, includeTurnstile = true, baseUrl = null, options = {}) => {
+  const {
+    includeTurnstileToken = includeTurnstile
+  } = options
   const headers = {
     'Content-Type': 'application/json'
   }
@@ -34,16 +28,16 @@ const createHeaders = (includeAuth = true, includeTurnstile = true, baseUrl = nu
     }
   }
   
-  if (includeTurnstile) {
+  if (includeTurnstile && includeTurnstileToken) {
     const turnstileToken = localStorage.getItem('turnstile_token')
     if (turnstileToken) {
       headers['X-Turnstile-Token'] = turnstileToken
     }
-    const key = getTurnstileVerifiedKey(baseUrl)
-    const turnstileVerified = localStorage.getItem(key)
-    if (turnstileVerified) {
-      headers['X-Turnstile-Verified'] = turnstileVerified
-    }
+  }
+
+  const turnstileVerified = localStorage.getItem(TURNSTILE_VERIFIED_KEY)
+  if (turnstileVerified) {
+    headers['X-Turnstile-Verified'] = turnstileVerified
   }
   
   return headers
@@ -55,18 +49,14 @@ const handleResponse = async (res, options = {}) => {
   if (res.status === 401) {
     localStorage.removeItem('jwt_token')
     if (autoRedirect) {
-      window.location.hash = getAdminHash(baseUrl)
+      window.location.hash = getAdminHash()
     }
     return { error: DEFAULT_ERROR_MESSAGES[401], status: 401 }
   }
   
   if (res.status === 403) {
     localStorage.removeItem('turnstile_token')
-    localStorage.removeItem('turnstile_verified')
-    try {
-      const key = getTurnstileVerifiedKey(baseUrl)
-      localStorage.removeItem(key)
-    } catch (_) {}
+    localStorage.removeItem(TURNSTILE_VERIFIED_KEY)
     if (autoRedirect) {
       window.location.reload()
     }
@@ -100,8 +90,7 @@ const handleResponse = async (res, options = {}) => {
   try {
     const data = await res.json()
     if (data && data.turnstile_verified) {
-      const key = getTurnstileVerifiedKey(baseUrl)
-      localStorage.setItem(key, data.turnstile_verified)
+      localStorage.setItem(TURNSTILE_VERIFIED_KEY, data.turnstile_verified)
       localStorage.removeItem('turnstile_token')
     }
     return { data, status: res.status }
@@ -112,7 +101,7 @@ const handleResponse = async (res, options = {}) => {
 
 const request = async (method, url, body, options = {}) => {
   const { includeAuth = true, includeTurnstile = true, autoRedirect = true, baseUrl = null } = options
-  const headers = createHeaders(includeAuth, includeTurnstile, baseUrl)
+  const headers = createHeaders(includeAuth, includeTurnstile, baseUrl, options)
   const base = baseUrl || getApiBases()[0]
 
   try {
@@ -130,7 +119,7 @@ const request = async (method, url, body, options = {}) => {
 
 const fetchWithBase = async (baseUrl, url, options, method = 'GET', body = null) => {
   const { includeAuth = true, includeTurnstile = true, autoRedirect = true } = options
-  const headers = createHeaders(includeAuth, includeTurnstile, baseUrl)
+  const headers = createHeaders(includeAuth, includeTurnstile, baseUrl, options)
 
   const res = await fetch(`${baseUrl}${url}`, {
     method,

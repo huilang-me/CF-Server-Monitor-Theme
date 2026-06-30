@@ -326,6 +326,9 @@ export const adminApi = async (data, apiIndex = 0) => {
 }
 
 export const login = async (username, password, turnstileToken = '', apiIndex = 0) => {
+  if (turnstileToken) {
+    localStorage.setItem('turnstile_token', turnstileToken)
+  }
   const result = await http.postByIndex('/admin/api', { action: 'login', username, password }, apiIndex, { autoRedirect: false })
   
   if (!result.error && result.data && result.data.token) {
