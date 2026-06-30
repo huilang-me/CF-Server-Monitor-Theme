@@ -129,7 +129,9 @@ async function initApp() {
   }
 
   const isMultipleMode = hasMultipleApiBases()
-  const isDashboard = window.location.hash === '' || window.location.hash === '#/' || window.location.hash === '#'
+  const currentHash = window.location.hash
+  const isDashboard = currentHash === '' || currentHash === '#/' || currentHash === '#'
+  const isAdmin = currentHash.startsWith('#/admin')
 
   // 多站模式首页：一次 getAll 获取所有站点配置，检查 turnstile 并合并出当前站点配置
   let config
@@ -162,11 +164,11 @@ async function initApp() {
   // 仅全局模式需要在启动时验证 Turnstile；登录模式在 Admin 页面的登录表单中验证
   if (config.turnstile_enabled) {
     if (isMultipleMode) {
-      showTurnstileUnsupported()
-      return
-    }
-
-    if (config.turnstile_site_key && !config.verified) {
+      if (!isAdmin) {
+        showTurnstileUnsupported()
+        return
+      }
+    } else if (config.turnstile_site_key && !config.verified) {
       const loading = document.getElementById('loading')
       if (loading) {
         loading.innerHTML = `
@@ -209,7 +211,7 @@ async function initApp() {
   const app = createApp(App)
   app.use(router)
   app.mount('#app').$nextTick(() => {
-    if (!config.is_public && !config.authorization) {
+    if (!isAdmin && !config.is_public && !config.authorization) {
       router.push('/admin')
     }
     const loading = document.getElementById('loading')

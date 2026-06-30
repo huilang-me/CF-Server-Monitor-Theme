@@ -13,6 +13,15 @@ const getTurnstileVerifiedKey = (baseUrl) => {
   return TURNSTILE_KEY_PREFIX + (baseUrl || getApiBases()[0])
 }
 
+const getAdminHash = (baseUrl) => {
+  const bases = getApiBases()
+  const index = bases.indexOf(baseUrl)
+  if (bases.length > 1) {
+    return `#/admin?apiIndex=${index >= 0 ? index : 0}`
+  }
+  return '#/admin'
+}
+
 const createHeaders = (includeAuth = true, includeTurnstile = true, baseUrl = null) => {
   const headers = {
     'Content-Type': 'application/json'
@@ -46,7 +55,7 @@ const handleResponse = async (res, options = {}) => {
   if (res.status === 401) {
     localStorage.removeItem('jwt_token')
     if (autoRedirect) {
-      window.location.hash = '#/admin'
+      window.location.hash = getAdminHash(baseUrl)
     }
     return { error: DEFAULT_ERROR_MESSAGES[401], status: 401 }
   }

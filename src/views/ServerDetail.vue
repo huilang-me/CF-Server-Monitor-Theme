@@ -956,6 +956,10 @@ const setTimeRange = (hours) => {
 
 const goToLogin = () => {
   showLoginModal.value = false
+  router.push({
+    path: '/admin',
+    query: { apiIndex: String(apiIndex.value) }
+  })
 }
 
 let liveSocket = null

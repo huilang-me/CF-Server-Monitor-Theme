@@ -1,26 +1,6 @@
 <template>
   <div>
-    <div v-if="isMultipleMode" class="remote-mode-disabled">
-      <div class="disabled-container">
-        <div class="disabled-icon">🔐</div>
-        <h2 class="disabled-title">{{ trans.adminDisabled }}</h2>
-        <p class="disabled-desc">{{ trans.adminDisabledDesc }}</p>
-        <div class="site-list">
-          <a
-            v-for="(base, index) in apiBases"
-            :key="index"
-            :href="base + '/#/admin'"
-            class="site-item"
-          >
-            <span class="site-index">[{{ index }}]</span>
-            <span class="site-url">{{ base }}</span>
-          </a>
-        </div>
-        <router-link to="/" class="btn btn-primary mt-4">← {{ trans.backToDashboard }}</router-link>
-      </div>
-    </div>
-    <div v-else>
-      <div v-if="!isLoggedIn" id="login-overlay" class="login-overlay">
+    <div v-if="!isLoggedIn" id="login-overlay" class="login-overlay">
       <div class="login-container">
         <div class="login-header">
           <div class="login-icon">🔐</div>
@@ -28,6 +8,18 @@
           <p class="login-subtitle">{{ trans.enterCredentials }}</p>
         </div>
         <form @submit.prevent="handleLogin">
+          <div v-if="isMultipleMode" class="login-form-group">
+            <label class="login-label">{{ trans.apiEndpoint }}</label>
+            <select v-model.number="selectedApiIndex" class="login-input" @change="handleApiIndexChange">
+              <option
+                v-for="(base, index) in apiBases"
+                :key="index"
+                :value="index"
+              >
+                [{{ index }}] {{ base }}
+              </option>
+            </select>
+          </div>
           <div class="login-form-group">
             <label class="login-label">{{ trans.username }}</label>
             <input type="text" name="username" autocomplete="username" v-model="loginForm.username" required class="login-input" placeholder="admin">
@@ -61,6 +53,21 @@
           </div>
           <div class="header-actions">
             <button @click="loadServers" class="btn">↻ {{ trans.refresh }}</button>
+            <select
+              v-if="isMultipleMode"
+              v-model.number="selectedApiIndex"
+              class="form-select admin-site-select"
+              :title="trans.apiEndpoint"
+              @change="handleAdminApiIndexChange"
+            >
+              <option
+                v-for="(base, index) in apiBases"
+                :key="index"
+                :value="index"
+              >
+                [{{ index }}] {{ base }}
+              </option>
+            </select>
             <button @click="logout" class="btn btn-red">🚪 {{ trans.logout }}</button>
           </div>
         </div>
@@ -195,7 +202,7 @@
 
         <div id="tab-settings" class="tab-content" :class="{ active: activeTab === 'settings' }">
           <div class="settings-grid">
-            <div class="settings-section" v-if="currentOrigin === getApiBases()[0]">
+            <div class="settings-section" v-if="currentOrigin === selectedApiBase">
               <div class="section-title"><span>▸</span> {{ trans.appearance }}</div>
 
               <div class="form-row">
@@ -902,12 +909,12 @@
 
       <Footer />
     </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import TerminalHeader from '../components/TerminalHeader.vue'
 import Footer from '../components/Footer.vue'
 import { adminApi, login, logout as apiLogout, formatBytes, upgradeDatabase, rebuildDatabase, getFlagRegionCode, getApiBases } from '../utils/api'
@@ -917,6 +924,8 @@ import { http } from '../utils/http'
 import { usePasswordVisibility } from '../composables/usePasswordVisibility'
 
 const trans = useTranslation()
+const route = useRoute()
+const router = useRouter()
 
 const getMessage = (msg) => {
   if (typeof msg === 'string') {
@@ -933,10 +942,30 @@ const getUsagePercent = (used, limit) => {
   return Math.min(100, Number(((Number(used || 0) / Number(limit)) * 100).toFixed(2)))
 }
 
-const currentOrigin = computed(() => window.location.origin)
-
 const isMultipleMode = computed(() => hasMultipleApiBases())
 const apiBases = getApiBases()
+const normalizeApiIndex = (value) => {
+  const index = parseInt(value, 10)
+  if (Number.isNaN(index) || index < 0 || index >= apiBases.length) return 0
+  return index
+}
+const selectedApiIndex = ref(normalizeApiIndex(route.query.apiIndex))
+const selectedApiBase = computed(() => apiBases[selectedApiIndex.value] || apiBases[0])
+const currentOrigin = computed(() => window.location.origin)
+
+const syncApiIndexQuery = () => {
+  if (!isMultipleMode.value) return
+  if (String(route.query.apiIndex ?? '') === String(selectedApiIndex.value)) return
+  router.replace({
+    path: '/admin',
+    query: {
+      ...route.query,
+      apiIndex: String(selectedApiIndex.value)
+    }
+  })
+}
+
+const adminApiForSite = (data) => adminApi(data, selectedApiIndex.value)
 
 const isLoggedIn = ref(false)
 const loginForm = ref({ username: '', password: '' })
@@ -1049,9 +1078,10 @@ const handleLogin = async () => {
       return
     }
     
-    const result = await login(loginForm.value.username, loginForm.value.password, turnstileToken.value)
+    const result = await login(loginForm.value.username, loginForm.value.password, turnstileToken.value, selectedApiIndex.value)
     if (!result.error) {
       isLoggedIn.value = true
+      syncApiIndexQuery()
       if (turnstileToken.value) {
         localStorage.setItem('turnstile_token', turnstileToken.value)
       }
@@ -1084,11 +1114,10 @@ const checkLoginStatus = () => {
 }
 
 const initAdmin = async () => {
-  if (hasMultipleApiBases()) return
-
   const hasCreds = checkLoginStatus()
   if (hasCreds) {
     isLoggedIn.value = true
+    syncApiIndexQuery()
     const savedTurnstileToken = localStorage.getItem('turnstile_token')
     if (savedTurnstileToken) {
       turnstileToken.value = savedTurnstileToken
@@ -1102,7 +1131,13 @@ const initAdmin = async () => {
 
 const loadTurnstileConfig = async () => {
   try {
-    const result = await http.get('/api/config', { includeAuth: true, includeTurnstile: true })
+    turnstileEnabled.value = false
+    turnstileLoginEnabled.value = false
+    turnstileSiteKey.value = ''
+    turnstileToken.value = ''
+    localStorage.removeItem('turnstile_token')
+
+    const result = await http.getByIndex('/api/config', selectedApiIndex.value, { includeAuth: true, includeTurnstile: true })
     if (!result.error) {
       const config = result.data
       turnstileEnabled.value = config.turnstile_enabled === true || config.turnstile_enabled === 'true'
@@ -1111,12 +1146,35 @@ const loadTurnstileConfig = async () => {
       
       if ((turnstileEnabled.value || turnstileLoginEnabled.value) && turnstileSiteKey.value) {
         await loadTurnstileScript()
+        await nextTick()
         renderTurnstile()
       }
     }
   } catch (e) {
     console.error('Failed to load Turnstile config:', e)
   }
+}
+
+const handleApiIndexChange = async () => {
+  syncApiIndexQuery()
+  await nextTick()
+  await loadTurnstileConfig()
+}
+
+const resetAdminContext = () => {
+  selectedServers.value = []
+  showEditModal.value = false
+  showDeleteModal.value = false
+  showCopyModal.value = false
+  showDbModal.value = false
+  validationError.value = null
+}
+
+const handleAdminApiIndexChange = async () => {
+  resetAdminContext()
+  syncApiIndexQuery()
+  await loadSettings()
+  await loadServers()
 }
 
 const loadTurnstileScript = () => {
@@ -1152,7 +1210,7 @@ const renderTurnstile = () => {
 
 const loadSettings = async () => {
   try {
-    const result = await adminApi({ action: 'get_settings' })
+    const result = await adminApiForSite({ action: 'get_settings' })
     if (!result.error) {
       const data = result.data
       const settingsData = data.settings || {}
@@ -1178,7 +1236,7 @@ const loadSettings = async () => {
         turnstile_secret_key: settingsData.turnstile_secret_key || '',
         cloudflare_account_id: settingsData.cloudflare_account_id || '',
         cloudflare_token: settingsData.cloudflare_token || '',
-        jwt_secret: settingsData.jwt_secret || '',
+        jwt_secret: '',
         username: settingsData.username || '',
         password: '',  // 不显示加密后的密码
         custom_ct: settingsData.custom_ct || '',
@@ -1266,7 +1324,6 @@ const saveSettings = async () => {
         turnstile_secret_key: settings.value.turnstile_secret_key,
         cloudflare_account_id: settings.value.cloudflare_account_id,
         cloudflare_token: settings.value.cloudflare_token,
-        jwt_secret: settings.value.jwt_secret,
         username: settings.value.username,
         custom_ct: settings.value.custom_ct,
         custom_cu: settings.value.custom_cu,
@@ -1280,8 +1337,13 @@ const saveSettings = async () => {
       data.settings.password = settings.value.password
     }
 
+    // JWT secret is write-only: only submit it when the user enters a new key.
+    if (jwtSecret && jwtSecret.length > 0) {
+      data.settings.jwt_secret = jwtSecret
+    }
+
     try {
-      const result = await adminApi(data)
+      const result = await adminApiForSite(data)
       if (!result.error) {
         alert(getMessage(result.data.message) || 'Success')
         location.reload()
@@ -1297,7 +1359,7 @@ const saveSettings = async () => {
 
   const loadServers = async () => {
     try {
-      const result = await adminApi({ action: 'list' })
+      const result = await adminApiForSite({ action: 'list' })
       if (!result.error) {
         const data = result.data
         servers.value = data.servers || []
@@ -1316,7 +1378,7 @@ const addServer = async () => {
     if (!name) return alert(trans.value.enterServerName)
 
     try {
-      const result = await adminApi({ action: 'add', name, server_group: newServerGroup.value })
+      const result = await adminApiForSite({ action: 'add', name, server_group: newServerGroup.value })
       if (!result.error) {
         alert(getMessage(result.data.message) || 'Success')
         location.reload()
@@ -1329,12 +1391,12 @@ const addServer = async () => {
   }
 
 const getInstallCommand = (serverId) => {
-  const HOST = getApiBases()[0]
+  const HOST = selectedApiBase.value
   return `curl -sL ${HOST}/install.sh | bash -s install -id=${serverId} -secret='${apiSecret.value}' -url=${HOST}/update`
 }
 
 const getUninstallCommand = () => {
-  return `curl -sL ${getApiBases()[0]}/install.sh | bash -s uninstall`
+  return `curl -sL ${selectedApiBase.value}/install.sh | bash -s uninstall`
 }
 
 const copyCmd = (serverId) => {
@@ -1357,7 +1419,7 @@ const copyCmd = (serverId) => {
 }
 
 const getCustomInstallCommand = () => {
-  const HOST = getApiBases()[0]
+  const HOST = selectedApiBase.value
   if (targetOs.value === 'windows') {
     const params = [
       'install',
@@ -1476,7 +1538,7 @@ const saveEdit = async () => {
     }
 
     try {
-      const result = await adminApi(data)
+      const result = await adminApiForSite(data)
       if (!result.error) {
         alert(getMessage(result.data.message) || 'Success')
         location.reload()
@@ -1499,7 +1561,7 @@ const saveEdit = async () => {
 
   const confirmDelete = async () => {
     try {
-      const result = await adminApi({ action: 'delete', id: deleteServerId.value })
+      const result = await adminApiForSite({ action: 'delete', id: deleteServerId.value })
       if (!result.error) {
         alert(getMessage(result.data.message) || 'Success')
         location.reload()
@@ -1516,7 +1578,7 @@ const saveEdit = async () => {
     if (!confirm(trans.value.confirmDeleteServers + selectedServers.value.length + trans.value.irreversible)) return
 
     try {
-      const result = await adminApi({ action: 'batch_delete', ids: selectedServers.value })
+      const result = await adminApiForSite({ action: 'batch_delete', ids: selectedServers.value })
       if (!result.error) {
         alert(getMessage(result.data.message) || 'Success')
         location.reload()
@@ -1570,7 +1632,7 @@ const getStatusText = (server) => {
     orders.splice(targetIndex, 0, dragged)
     
     try {
-      const result = await adminApi({ action: 'save_order', orders })
+      const result = await adminApiForSite({ action: 'save_order', orders })
       if (!result.error) {
         loadServers()
       }
@@ -1600,7 +1662,7 @@ const handleUpgradeDatabase = async () => {
   dbResult.value = null
   
   try {
-    const result = await upgradeDatabase()
+    const result = await upgradeDatabase(selectedApiIndex.value)
     dbResult.value = result
     if (result.success) {
       setTimeout(() => {
@@ -1621,7 +1683,7 @@ const handleRebuildDatabase = async () => {
   dbResult.value = null
   
   try {
-    const result = await rebuildDatabase()
+    const result = await rebuildDatabase(selectedApiIndex.value)
     dbResult.value = result
     if (result.success) {
       setTimeout(() => {
@@ -1654,7 +1716,7 @@ const queryD1Usage = async () => {
   d1UsageResult.value = null
 
   try {
-    const result = await adminApi({ action: 'd1_usage' })
+    const result = await adminApiForSite({ action: 'd1_usage' })
     if (!result.error) {
       d1UsageResult.value = result.data
     } else {
@@ -1666,6 +1728,21 @@ const queryD1Usage = async () => {
     d1UsageLoading.value = false
   }
 }
+
+watch(() => route.query.apiIndex, async (value) => {
+  const nextIndex = normalizeApiIndex(value)
+  if (nextIndex === selectedApiIndex.value) return
+
+  selectedApiIndex.value = nextIndex
+  resetAdminContext()
+
+  if (isLoggedIn.value) {
+    await loadSettings()
+    await loadServers()
+  } else {
+    await loadTurnstileConfig()
+  }
+})
 
 onMounted(() => {
   initAdmin()

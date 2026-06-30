@@ -69,21 +69,12 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
 
   const collectBatchEventGroups = (msg) => {
     const groups = []
-    const updates = Array.isArray(msg.updates)
-      ? msg.updates
-      : (msg.serverId ? [{ serverId: msg.serverId, samples: msg.samples, data: msg.data, payload: msg.payload, ts: msg.ts }] : [])
+    const updates = Array.isArray(msg.updates) ? msg.updates : []
 
     for (const update of updates) {
       if (!update || !update.serverId) continue
       const events = []
-      const samples = Array.isArray(update.samples)
-        ? update.samples
-        : (update.payload || update.data
-            ? [{
-                ts: (update.data || update.payload).sample_timestamp || (update.data || update.payload).last_updated || (update.data || update.payload).timestamp || update.ts || msg.ts,
-                data: update.data || update.payload
-              }]
-            : [])
+      const samples = Array.isArray(update.samples) ? update.samples : []
 
       for (const sample of samples) {
         if (!sample || typeof sample !== 'object') continue
@@ -149,13 +140,6 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
       } catch (_) { return }
       if (!msg) return
 
-      if (shouldReplay && msg.type === 'update') {
-        emitUpdate({
-          serverId: msg.serverId,
-          data: msg.data,
-          ts: msg.data?.sample_timestamp || msg.data?.last_updated || msg.data?.timestamp || msg.ts
-        })
-      }
       if (shouldReplay && msg.type === 'batchUpdate') {
         replayBatch(msg)
       }
@@ -336,13 +320,13 @@ export const fetchAllHistory = async (id, hours, apiIndex = 0) => {
   return result.data
 }
 
-export const adminApi = async (data) => {
-  const result = await http.post('/admin/api', data)
+export const adminApi = async (data, apiIndex = 0) => {
+  const result = await http.postByIndex('/admin/api', data, apiIndex)
   return result
 }
 
-export const login = async (username, password, turnstileToken = '') => {
-  const result = await http.post('/admin/api', { action: 'login', username, password }, { autoRedirect: false })
+export const login = async (username, password, turnstileToken = '', apiIndex = 0) => {
+  const result = await http.postByIndex('/admin/api', { action: 'login', username, password }, apiIndex, { autoRedirect: false })
   
   if (!result.error && result.data && result.data.token) {
     localStorage.setItem('jwt_token', result.data.token)
@@ -363,8 +347,8 @@ export const fetchConfig = async () => {
   return result.data
 }
 
-export const upgradeDatabase = async () => {
-  const result = await http.post('/updateDatabase', {}, { autoRedirect: false })
+export const upgradeDatabase = async (apiIndex = 0) => {
+  const result = await http.postByIndex('/updateDatabase', {}, apiIndex, { autoRedirect: false })
   if (result.error) {
     if (result.status === 401) {
       return { success: false, error: 'Unauthorized' }
@@ -374,8 +358,8 @@ export const upgradeDatabase = async () => {
   return result.data
 }
 
-export const rebuildDatabase = async () => {
-  const result = await http.post('/rebuild', {}, { autoRedirect: false })
+export const rebuildDatabase = async (apiIndex = 0) => {
+  const result = await http.postByIndex('/rebuild', {}, apiIndex, { autoRedirect: false })
   if (result.error) {
     if (result.status === 401) {
       return { success: false, error: 'Unauthorized' }
